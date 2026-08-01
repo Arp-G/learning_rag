@@ -9,6 +9,9 @@ config :learning_rag, LearningRag.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
+  # Same Docker Postgres as dev (docker-compose.yml) — the container must be
+  # running for `mix test` / `mix precommit`.
+  port: 5434,
   database: "learning_rag_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2

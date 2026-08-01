@@ -34,3 +34,7 @@ learning_rag-*.tar
 # In case you use Node.js/npm, you want to ignore these.
 npm-debug.log
 /assets/node_modules/
+
+
+# RAG datasets (downloaded via `mix rag.download`)
+/priv/data/

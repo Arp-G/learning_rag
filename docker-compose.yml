@@ -1,0 +1,24 @@
+services:
+  db:
+    # pgvector image: plain Postgres 17 with the pgvector extension available.
+    # Phase 1 (sparse retrieval) doesn't use pgvector, but the semantic-search
+    # phase will — using this image now means no infra change later.
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      # Host port 5434 to avoid clashing with a local Postgres (5432) or the
+      # engage project's dockerized Postgres (5433).
+      - "5434:5432"
+    volumes:
+      - learning_rag_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Required for `docker compose up --wait` to actually wait for readiness.
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  learning_rag_pgdata:

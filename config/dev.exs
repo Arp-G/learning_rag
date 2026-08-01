@@ -5,6 +5,9 @@ config :learning_rag, LearningRag.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
+  # Postgres runs in Docker (see docker-compose.yml), mapped to host port 5434
+  # so it never clashes with other local Postgres instances (5432/5433).
+  port: 5434,
   database: "learning_rag_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,

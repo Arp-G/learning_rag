@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# One-shot project setup: start Postgres (Docker), then install deps,
+# create + migrate the database, and build assets (the `mix setup` alias).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+docker compose up -d --wait
+mix setup
+
+echo
+echo "Setup complete. Next steps:"
+echo "  mix rag.download   # fetch the SciFact dataset"
+echo "  mix rag.index      # load + chunk + build the inverted index"
+echo "  mix rag.search \"vitamin D deficiency\" --scorer bm25"
