@@ -1,23 +1,22 @@
 defmodule LearningRag.Ingest.Chunker do
   @moduledoc """
-  Splits a document into fixed-size overlapping word windows — the passages
-  ("chunks") that retrieval actually operates on.
+  Splits a document into overlapping windows of words — the passages ("chunks")
+  that search actually runs on.
 
-  Why chunk at all? Ranking whole documents is too coarse: a long document
-  about ten topics would match everything weakly. Chunks give retrieval a
-  focused unit whose words are all about the same thing.
+  Why chunk at all? Scoring whole documents is too coarse: a long document
+  covering ten topics matches lots of queries a little bit. Chunks give search
+  a smaller, focused unit whose words are mostly about one thing.
 
-  Why overlap? A sentence that straddles a window boundary would otherwise be
-  split across two chunks and match neither. Overlap guarantees every
-  position of the text appears un-split in at least one chunk.
+  Why overlap? A phrase sitting right on a window boundary would get split
+  across two chunks and match neither well. Overlapping the windows means every
+  stretch of text shows up whole in at least one chunk.
 
-  The title is prepended to every chunk — a poor man's "field boost": title
-  words are usually the most informative, and repeating them in each chunk
-  gives them term-frequency credit wherever the document is matched.
+  We stick the title on the front of every chunk. Titles are usually the most
+  descriptive words, so repeating them in each chunk lets those words help the
+  document match no matter which chunk gets retrieved.
 
-  SciFact abstracts run ~250 words, so most documents produce just 1–2
-  chunks here. That's expected — chunking gets interesting later, with
-  longer documents.
+  SciFact abstracts are ~250 words, so most documents here become just 1–2
+  chunks. That's fine — chunking gets more interesting later with longer docs.
   """
 
   # Window size and overlap, in whitespace-separated words. Deliberately plain

@@ -1,20 +1,20 @@
 defmodule LearningRag.Eval.Runner do
   @moduledoc """
-  Runs a scorer over all of SciFact's test queries and averages the metrics.
+  Runs a scorer over all of SciFact's test queries and averages the scores.
 
-  The one subtlety worth understanding: retrieval returns CHUNKS, but the
-  qrels judge DOCUMENTS. So for each query we:
+  The one tricky bit: search returns CHUNKS, but the answer key (qrels) is
+  about DOCUMENTS. So for each query we:
 
-    1. retrieve a pool of chunks (more than K, because several chunks can map
-       to the same document and collapse together),
-    2. map each chunk to its parent document, keeping the best-ranked chunk
-       per document (the results are already score-ordered, so `uniq_by` keeps
-       the first — i.e. highest-scoring — occurrence),
-    3. truncate to K documents,
-    4. score that document ranking against the query's qrels.
+    1. get a pool of chunks (more than the 10 we grade, because several chunks
+       can belong to the same document and collapse into one),
+    2. map each chunk to its document, keeping that document's best-ranked
+       chunk (results are already sorted by score, so the first time we see a
+       document is its best hit),
+    3. cut down to the top 10 documents,
+    4. compare that document ranking against the query's answer key.
 
-  Then MRR = mean of per-query reciprocal rank, MAP = mean of per-query
-  average precision, and so on.
+  Then MRR is the average of each query's reciprocal rank, MAP is the average
+  of each query's average precision, and so on.
   """
   require Logger
 
@@ -72,11 +72,21 @@ defmodule LearningRag.Eval.Runner do
   end
 
   defp evaluate_query(scorer_module, query, relevance, opts) do
+    # Turn the query's chunk hits into a ranked list of DOCUMENT ids to grade.
+    # Key fact used below: the scorer returns chunks already sorted best-score
+    # first (its SQL ends with ORDER BY score DESC).
     ranked_docs =
       query.text
+      # search over chunks. Ask for a big pool (not just @doc_k) because several
+      # of these chunks can belong to the same document and collapse into one in
+      # the next step — we still want @doc_k distinct documents left afterwards.
       |> scorer_module.search(Keyword.put(opts, :top_k, @chunk_pool))
-      # chunk hits → parent documents, best-ranked chunk per document wins.
+      # Collapse chunks → documents. uniq_by keeps the FIRST row it sees for each
+      # document_id and drops the rest. Since the list is sorted best-first, that
+      # first row is the document's highest-scoring chunk — so each document is
+      # represented once, at its best chunk. (Only correct because it's sorted.)
       |> Enum.uniq_by(& &1.document_id)
+      # keep the top @doc_k documents, then reduce each row to just its id.
       |> Enum.take(@doc_k)
       |> Enum.map(& &1.document_id)
 

@@ -1,26 +1,41 @@
 defmodule LearningRag.Search.TfIdf do
   @moduledoc """
-  Classic TF-IDF ranking — deliberately the simplest textbook variant, kept
-  as a side-by-side contrast with `Search.Bm25`.
+  TF-IDF: the classic, simplest way to score how well a chunk matches a query.
+  We keep it next to BM25 as a plain contrast — same index, same result shape,
+  so the eval numbers differ only because the formula differs.
 
-      score(D, Q) = Σ  tf · ln(N / df)
-                   t∈Q
+  The name is two ingredients multiplied together, one word at a time:
 
-  with tf = term frequency in the chunk, N = number of chunks, df = chunks
-  containing the term. Compared to BM25, notice what's *missing*:
+    TF — Term Frequency (counted inside ONE chunk): how many times the word
+         appears in this chunk. More mentions → the chunk is more about it.
 
-    * raw tf, no saturation — a term repeated 50× counts 50×, so keyword
-      stuffing wins (BM25's k1 fixes this).
-    * no length normalization — a longer chunk racks up more tf and ranks
-      higher just for being long (BM25's b fixes this).
-    * ln(N/df) is exactly 0 when df = N — a term appearing in EVERY chunk
-      carries no information and contributes nothing. (BM25's `1 +` variant
-      keeps such a term slightly positive instead.)
+           tf = number of times the word appears in the chunk
 
-  Same inverted index, same query pipeline, same result shape as BM25 — so the
-  eval runner can swap one for the other and the difference in the metrics is
-  purely the difference in these two formulas. It accepts (and ignores) `:k1`
-  and `:b` so callers can treat both scorers identically.
+    IDF — Inverse Document Frequency (counted ACROSS all chunks): how rare the
+          word is in the whole collection. A word that's in only a few chunks
+          is better at telling chunks apart than a word that's everywhere.
+
+           idf = ln(N / df)     N = total chunks, df = chunks with the word
+
+          e.g. with N = 100 chunks: a word in just 1 chunk → ln(100) ≈ 4.6
+          (rare, valuable); a word in all 100 → ln(1) = 0 (useless, it's
+          everywhere).
+
+  For each query word that appears in the chunk, multiply the two and add them
+  up:
+
+      score = Σ  tf · idf  =  Σ  tf · ln(N / df)
+
+  What TF-IDF is missing compared to BM25 (this is why BM25 scores better):
+
+    * raw tf, no flattening — a word repeated 50 times counts 50×, so keyword
+      stuffing wins. BM25's `k1` fixes this.
+    * no length check — a long chunk piles up more tf and ranks higher just
+      for being long. BM25's `b` fixes this.
+    * ln(N/df) is exactly 0 when df = N — a word in every chunk adds nothing.
+
+  It accepts (and ignores) `:k1` and `:b` so callers can treat it exactly like
+  `Bm25.search/2`.
   """
   require Logger
 
@@ -28,30 +43,37 @@ defmodule LearningRag.Search.TfIdf do
 
   @default_top_k 10
 
-  # Params: $1 = terms (text[]), $2 = top_k. Same CTE skeleton as BM25 so the
-  # two are easy to diff — the whole difference is in the `contributions` CTE.
+  # Inputs: $1 = search words, $2 = how many results to return. Same shape as
+  # the BM25 query on purpose — the only real difference is the contributions
+  # block below.
   @sql """
   WITH query_terms AS (
+    -- the search words, already stemmed the same way the chunks were
     SELECT unnest($1::text[]) AS term
   ),
   corpus AS (
-    -- ::float8 so N / df below is real division, not integer truncation.
+    -- N = how many chunks exist. ::float8 so N / df below is real division,
+    -- not integer (which would truncate, e.g. 3 / 2 = 1).
     SELECT count(*)::float8 AS n FROM chunks
   ),
   term_stats AS (
+    -- for each search word, how many chunks contain it (df).
     SELECT p.term, count(*)::float8 AS df
     FROM postings p
     JOIN query_terms q ON q.term = p.term
     GROUP BY p.term
   ),
   contributions AS (
-    -- The entire TF-IDF model: tf · ln(N/df). No saturation, no length term.
+    -- Here we calculate for every (word, chunk):
+    -- tf (count in this chunk) times
+    -- idf (rarity = ln(N/df))
+    -- and finally tf * idf
     SELECT
       p.chunk_id,
       p.term,
-      p.tf,
-      ln(corpus.n / ts.df) AS idf,
-      p.tf * ln(corpus.n / ts.df) AS contribution
+      p.tf,                                       -- number of times the word appears in the chunk
+      ln(corpus.n / ts.df) AS idf,                -- ln(total chunks / chunks with the word )
+      p.tf * ln(corpus.n / ts.df) AS contribution -- tf * idf
     FROM postings p
     JOIN term_stats ts ON ts.term = p.term
     CROSS JOIN corpus

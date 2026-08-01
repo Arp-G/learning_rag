@@ -1,28 +1,27 @@
 defmodule LearningRag.Search do
   @moduledoc """
-  Shared helpers for the sparse-retrieval scorers (`Search.Bm25`, `Search.TfIdf`).
+  Shared helpers for the two keyword scorers (`Search.Bm25`, `Search.TfIdf`).
 
-  Both scorers follow the same shape — turn the query into stemmed terms, then
-  run one SQL statement that computes the score as a sparse dot product over
-  the postings. The bits they share live here.
+  Both work the same way: turn the query into stemmed words, then run one SQL
+  statement that scores each chunk by adding up the words it shares with the
+  query. The shared bits live here.
   """
   alias LearningRag.Repo
 
   @doc """
-  Turns raw query text into the same stemmed terms the indexer stored.
+  Turns raw query text into the same stemmed words the indexer stored.
 
-  This calls the EXACT SAME `to_tsvector('english', …)` used when building the
-  postings (see `Indexer` — the 'english' config must match). Running query
-  and documents through one pipeline is what makes their terms line up:
-  "imaging" in a document and "imaging" in a query both become "imag".
+  It runs the query through the EXACT SAME `to_tsvector('english', …)` used to
+  build the postings. That's the whole trick to matching: "imaging" in a
+  document and "imaging" in a query both become "imag", so they line up.
 
-  `tsvector_to_array` returns the lexemes deduplicated and sorted
-  alphabetically. Dedup means a word repeated in the query counts once — the
-  standard BM25 convention of ignoring within-query term frequency. (So the
-  per-term breakdown is alphabetical, not in query order.)
+  `tsvector_to_array` gives the words back de-duplicated and sorted
+  alphabetically. De-duplicated means a word typed twice in the query still
+  counts once. (Sorted means the per-word breakdown comes out alphabetical,
+  not in the order you typed.)
 
-  Returns `[]` for a query that is all stopwords/punctuation — callers should
-  short-circuit and skip the SQL entirely.
+  Returns `[]` for a query that is all stopwords/punctuation — the scorers
+  check for this and skip the SQL entirely.
   """
   @spec stem_terms(String.t()) :: [String.t()]
   def stem_terms(query_text) do
@@ -33,13 +32,11 @@ defmodule LearningRag.Search do
   end
 
   @doc """
-  Turns a scorer's raw `Postgrex.Result` into a list of result maps, keyed by
-  the query's column names.
+  Turns a scorer's raw query result into a list of maps, keyed by column name.
 
-  Both scorers SELECT the same top-level columns (only the `breakdown` JSON
-  differs), so decoding by column name keeps this generic and order-independent.
-  The column names are our own fixed SQL aliases — never user input — so
-  `String.to_atom/1` is safe here (no risk of atom-table exhaustion).
+  Both scorers return the same columns (only the `breakdown` JSON differs), so
+  decoding by column name keeps this generic. The column names come from our
+  own SQL, never from user input, so turning them into atoms is safe here.
   """
   @spec to_results(Postgrex.Result.t()) :: [map()]
   def to_results(%Postgrex.Result{columns: columns, rows: rows}) do

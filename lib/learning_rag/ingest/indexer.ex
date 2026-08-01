@@ -37,9 +37,17 @@ defmodule LearningRag.Ingest.Indexer do
     qrels_path = Path.join([data_dir, "qrels", "test.tsv"])
 
     reset!()
+    # Load the documents in the db and their chunks
     doc_map = load_documents(corpus_path)
+
+    # Create the term frequency(TF) table for each chunk in the DB,
+    # This helps in later calculations, it a representation of the sparse vector
     build_postings!()
+
+    # Populate token counts for each chunk, this will used in later steps
     backfill_token_counts!()
+
+    # Load existing input/output set for checking
     load_eval_data(queries_path, qrels_path, doc_map)
 
     Logger.info("Indexing complete.")
@@ -117,20 +125,42 @@ defmodule LearningRag.Ingest.Indexer do
 
   # --- Step 3: postings (the inverted index) ------------------------------
 
-  # to_tsvector('english', text) IS the linguistic pipeline: it tokenizes,
-  # drops stopwords, and Snowball-stems (e.g. "imaging" → "imag"). We use
-  # Postgres ONLY for that — never ts_rank / @@; all ranking is our own SQL.
+  # Builds the whole inverted index in one statement: one (term, chunk_id, tf)
+  # row per distinct term per chunk.
+  # This is a representation of the sparse vector for keyword search.
+  # Basically we prepare a table of how many times each term/word appears in every chunk
+
+  # Here's the query walked on a single chunk
   #
-  # unnest(tsvector) yields one row per distinct lexeme with its positions
-  # array, so cardinality(positions) is that term's frequency in the chunk.
-  # Each (term, chunk_id, tf) row is one nonzero cell of the term×chunk matrix.
+  #   1. to_tsvector('english', 'The cats are running; cats jump.')
+  # .     does ALL the linguistics — tokenize, drop stopwords, Snowball-stem — and records
+  #       each term's positions:
   #
-  # NOTE: the 'english' config here MUST match the one in Search.stem_terms/1.
-  # Same function + same config on both sides = query and documents are
-  # processed identically, which is what makes matching work at all.
+  #        'cat':2,5 'jump':6 'run':4
   #
-  # (Module attributes must be defined before the functions that read them,
-  # or the attribute is nil at that point — a classic Elixir gotcha.)
+  #      ("the"/"are" dropped as stopwords; "cats"→"cat", "running"→"run";
+  #       "cat" occurs at word-positions 2 and 5).
+  #
+  #   2. unnest(...) turns that one tsvector value into one row per term:
+  #
+  #        lexeme | positions
+  #        -------+----------
+  #        cat    | {2,5}
+  #        jump   | {6}
+  #        run    | {4}
+  #
+  #   3. the SELECT maps each row to a postings row —
+  # .       unnest(tsvector) emits 3 cols in a select - lexeme text, positions smallint[], weights text[]
+  #        term = t.lexeme,  chunk_id = c.id,  tf = cardinality(t.positions):
+  #
+  #        ('cat', 42, 2)   ('jump', 42, 1)   ('run', 42, 1)
+  #
+  #      cardinality(positions) is the number of positions, i.e. how many times
+  #      the term appeared — so the (TF)term frequency in the chunk.
+  #
+  #   4. CROSS JOIN LATERAL just pairs each chunk with its own terms, so the
+  #      SELECT does the above for every chunk in a single pass.
+  #
   @build_postings_sql """
   INSERT INTO postings (term, chunk_id, tf)
   SELECT t.lexeme, c.id, cardinality(t.positions)
@@ -152,9 +182,7 @@ defmodule LearningRag.Ingest.Indexer do
   # --- Step 4: token counts -----------------------------------------------
 
   # A chunk's length (for length normalization) is the sum of tf over its
-  # postings — a column sum of the sparse matrix. COALESCE handles a chunk
-  # whose every word was a stopword (no postings at all).
-  # Relies on the postings(chunk_id) index; without it this is O(chunks × postings).
+  # postings — a column sum of the sparse matrix. Basically its the token count in each chunk.
   @token_count_sql """
   UPDATE chunks
   SET token_count = COALESCE(

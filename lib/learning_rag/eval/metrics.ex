@@ -1,25 +1,26 @@
 defmodule LearningRag.Eval.Metrics do
   @moduledoc """
-  Classic IR ranking metrics, as pure functions over one query's result.
+  The standard search-quality metrics, as plain functions over one query's
+  results.
 
   Every function takes the same two things:
 
     * `ranked`    — the ids your search returned, best first
-    * `relevance` — the answer key for this query: `%{id => grade}`,
-      where grade > 0 means relevant (SciFact grades are all 1)
+    * `relevance` — the answer key for this query: `%{id => grade}`, where a
+      grade above 0 means relevant (SciFact's grades are all 1)
 
-  and answers one question about the ranking:
+  and each answers one question about the ranking:
 
     * `precision_at_k/3` — of my top K, what fraction is relevant?
     * `recall_at_k/3`    — of everything relevant, what fraction made my top K?
     * `reciprocal_rank/3`— how high is the FIRST relevant hit? (1/rank)
-    * `average_precision/2` — precision averaged over each relevant hit's rank;
-      rewards putting relevant docs early, not just somewhere in the top K
-    * `ndcg_at_k/3`      — like AP but with graded relevance and a smooth
-      log2 position discount; the number BEIR baselines report
+    * `average_precision/2` — rewards putting relevant docs early, not just
+      somewhere in the top K
+    * `ndcg_at_k/3`      — like average precision, but the higher up a relevant
+      hit sits the more it counts; this is the number the BEIR benchmark reports
 
-  These score ONE query. The eval runner computes them per query and averages:
-  mean of `reciprocal_rank` = MRR, mean of `average_precision` = MAP, etc.
+  Each of these scores ONE query. The runner averages them across all queries:
+  average of `reciprocal_rank` = MRR, average of `average_precision` = MAP, etc.
   """
 
   @doc """

@@ -1,90 +1,120 @@
 defmodule LearningRag.Search.Bm25 do
   @moduledoc """
-  BM25 ranking, computed entirely in SQL so every part of the formula stays
-  visible and inspectable.
+  BM25 gives each chunk a score for how well it matches the search query. We
+  do the whole calculation in SQL so you can follow every step.
 
-  For a query Q and chunk D, BM25 sums one contribution per shared term t:
+  The idea: for every word in the query that also appears in a chunk, we add a
+  bit to that chunk's score. How big that bit is depends on 3 things:
 
-      score(D, Q) = Σ  IDF(t) · (tf · (k1 + 1)) / (tf + k1 · (1 − b + b · |D|/avgdl))
-                   t∈Q
+    1. How rare the word is.
+       A word that shows up in almost every chunk (like "study") barely tells
+       us anything, so matching it is worth little. A rare word (like
+       "diffusion") is a strong signal, so matching it is worth a lot.
+       `df` = how many chunks contain the word; fewer chunks → higher score.
 
-      IDF(t) = ln(1 + (N − df + 0.5) / (df + 0.5))    ("Lucene" variant)
+    2. How many times the word appears in the chunk, but with diminishing
+       returns. A chunk that says "cat" 5 times is more about cats than one
+       that says it once. But going from 1 to 2 matters much more than going
+       from 20 to 21 — the reward flattens out. The `k1` knob sets how fast it
+       flattens. Default 1.2.
 
-  with N = number of chunks, df = chunks containing t, tf = t's frequency in
-  D, |D| = D's token_count, avgdl = mean token_count. This is a sparse dot
-  product: only terms present in both Q and D contribute.
+    3. How long the chunk is. A long chunk repeats words just because it's
+       long, not because it's more on-topic, so we shrink the score for chunks
+       that are longer than average. The `b` knob sets how strong that shrink
+       is: `b = 0` ignores length, `b = 1` applies the full discount.
+       Default 0.75.
 
-  What BM25 adds over plain TF-IDF is exactly the two knobs:
+  A chunk's final score is just the sum of these per-word bits.
 
-    * `k1` — term-frequency saturation. A term's tf contribution rises toward
-      a ceiling of (k1 + 1) instead of growing linearly, so the 20th mention
-      of a word barely beats the 5th. Typical: 1.2.
-    * `b`  — length normalization strength. `b = 1` fully penalizes chunks
-      longer than average (their matches are "diluted"); `b = 0` ignores
-      length entirely. Typical: 0.75.
+  Example — search "cat", say there are 100 chunks and "cat" is in 20 of them:
 
-  Both are query-time bind parameters, so changing them re-scores instantly —
-  no reindexing. That's the whole reason we store raw `tf` in the postings.
+    * Chunk A says "cat" 3 times and is short.
+    * Chunk B says "cat" 3 times and is very long.
 
-  We use the Lucene IDF variant (the `1 +` inside the log) rather than the
-  classic Robertson IDF because it can't go negative, and because it's what
-  the published BM25 baselines we compare against use.
+  Both match "cat" the same number of times, but A scores higher because B's
+  length gets discounted (thing 3).
+
+  The exact formula, added up over each query word that appears in the chunk:
+
+      score = Σ  idf · (tf · (k1 + 1)) / (tf + k1 · (1 − b + b · dl/avgdl))
+
+      idf = ln(1 + (N − df + 0.5) / (df + 0.5))
+
+  where N = total chunks, df = chunks containing the word, tf = times the word
+  appears in this chunk, dl = this chunk's length, avgdl = average chunk
+  length. (The "1 +" in idf just keeps the score from ever going negative, and
+  matches the standard BM25 that published benchmarks use.)
+
+  `k1` and `b` are passed in at query time, so you can change them and re-score
+  instantly — no reindexing needed. That's why postings stores the raw `tf`.
   """
   require Logger
 
   alias LearningRag.{Repo, Search}
 
-  # Standard BM25 defaults.
+  # The two BM25 knobs at their usual textbook defaults (see the module doc for
+  # the full intuition). Both can be overridden per search via opts.
+  #
+  # k1 — how fast repeated words stop helping. Higher = repeats keep adding a
+  # lot; lower = they flatten out faster (k1 = 0 → a word's count doesn't matter
+  # at all, only whether it appears).
   @default_k1 1.2
+
+  # b — how hard to discount long chunks. b = 0 ignores length entirely;
+  # b = 1 fully discounts chunks that are longer than average.
   @default_b 0.75
+
+  # how many results to return when the caller doesn't say
   @default_top_k 10
 
-  # The scoring query. One named CTE per concept in the formula above, so the
-  # SQL reads like the math. Params: $1 = terms (text[]), $2 = k1, $3 = b,
-  # $4 = top_k. (Defined before search/2 — module attributes read as nil if
-  # referenced before their definition.)
+  # The scoring query. Each step of the math is its own named block (a CTE), so
+  # the SQL reads top-to-bottom like the explanation above.
+  # Inputs: $1 = search words, $2 = k1, $3 = b, $4 = how many results to return.
   @sql """
   WITH query_terms AS (
-    -- The stemmed query lexemes, produced in Elixir by the SAME
-    -- to_tsvector('english', …) used at indexing time.
+    -- the search words, already stemmed the same way the chunks were
     SELECT unnest($1::text[]) AS term
   ),
   corpus AS (
-    -- Live corpus statistics. The ::float8 casts are load-bearing: count(*)
-    -- is bigint, and bigint / bigint would truncate to an integer.
+    -- totals we need: n = how many chunks exist, avgdl = average chunk length.
+    -- the ::float8 casts matter — without them Postgres does integer division
+    -- and truncates (e.g. 3 / 2 = 1).
     SELECT count(*)::float8 AS n, avg(token_count)::float8 AS avgdl
     FROM chunks
   ),
   term_stats AS (
-    -- df(t): how many chunks contain each query term. Rarer term → smaller
-    -- df → larger IDF: rare words are the informative ones.
+    -- for each search word, how many chunks contain it (df).
+    -- rarer word (smaller df) → bigger idf below → counts for more.
     SELECT p.term, count(*)::float8 AS df
     FROM postings p
     JOIN query_terms q ON q.term = p.term
     GROUP BY p.term
   ),
   contributions AS (
-    -- One row per (query term × matching chunk): that term's additive share
-    -- of the chunk's score. Kept as rows so we can show a per-term breakdown.
+    -- Here we calculate for every (word, chunk):
+    -- idf     (how rare the word is: rare word → big number)
+    -- tf_part (its count in this chunk, flattened by k1 and shrunk for long chunks by b)
+    -- the pair's score is idf * tf_part, added up per chunk in `ranked` below.
+    -- one row per (word, chunk) so we can also show the per-word breakdown.
     SELECT
       p.chunk_id,
       p.term,
-      p.tf,
-      -- IDF(t): ln(1 + (N − df + 0.5)/(df + 0.5)).
-      ln(1 + (corpus.n - ts.df + 0.5) / (ts.df + 0.5)) AS idf,
-      -- Saturating TF with length normalization:
-      --   tf·(k1+1) / (tf + k1·(1 − b + b·|D|/avgdl))
-      (p.tf * ($2::float8 + 1))
-        / (p.tf + $2::float8 * (1 - $3::float8 + $3::float8 * c.token_count / corpus.avgdl))
-        AS tf_part
+      p.tf,                                                     -- times the word appears in this chunk
+
+      ln(1 + (corpus.n - ts.df + 0.5) / (ts.df + 0.5)) AS idf,  -- rarity = ln(1 + (N-df+0.5)/(df+0.5))
+
+                                                                -- tf_part = tf·(k1+1) / (tf + k1·(1 - b + b·dl/avgdl))
+                                                                -- count, flattened (k1) + length-adjusted (b)
+      (p.tf * ($2::float8 + 1)) / (p.tf + $2::float8 * (1 - $3::float8 + $3::float8 * c.token_count / corpus.avgdl)) AS tf_part
+
     FROM postings p
     JOIN term_stats ts ON ts.term = p.term
     JOIN chunks c ON c.id = p.chunk_id
     CROSS JOIN corpus
   ),
   ranked AS (
-    -- score(D,Q) = Σ idf · tf_part. The chunk_id tiebreak makes ties
-    -- deterministic (the tests depend on a stable order).
+    -- add up each chunk's word-scores to get its total, then keep the top N.
+    -- the chunk_id tiebreak keeps ties in a stable order (tests rely on it).
     SELECT chunk_id, sum(idf * tf_part) AS score
     FROM contributions
     GROUP BY chunk_id
@@ -100,7 +130,7 @@ defmodule LearningRag.Search.Bm25 do
     d.id AS document_id,
     d.external_id AS doc_external_id,
     d.title,
-    -- Per-term breakdown for the survivors, biggest contribution first.
+    -- the per-word breakdown for each result, biggest contributor first.
     jsonb_agg(
       jsonb_build_object(
         'term', co.term, 'tf', co.tf, 'idf', co.idf,
@@ -135,8 +165,8 @@ defmodule LearningRag.Search.Bm25 do
 
       terms ->
         Logger.info("BM25: #{inspect(query_text)} → #{inspect(terms)} (k1=#{k1}, b=#{b})")
-        # k1 / 1 and b / 1 force floats even if the caller passed integers,
-        # so the ::float8 params always receive floats.
+        # k1 / 1 and b / 1 turn whole numbers into floats, so the SQL always
+        # gets floats even if the caller passed e.g. 1 instead of 1.0.
         result = Repo.query!(@sql, [terms, k1 / 1, b / 1, top_k])
         Search.to_results(result)
     end

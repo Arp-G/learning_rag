@@ -1,10 +1,10 @@
 defmodule LearningRag.Corpus.Document do
   @moduledoc """
-  An original ingested document, stored as it arrived (title + raw body).
+  An original document, stored as it came in (title + raw body).
 
-  Documents are never searched directly — retrieval happens over `Chunk`s.
-  This table exists for provenance (mapping any search hit back to its
-  source) and so the corpus can be re-chunked without re-downloading.
+  We never search this table directly — search runs over `Chunk`s. It's here so
+  we can trace any search hit back to where it came from, and so we can re-chunk
+  the corpus without downloading it again.
   """
   use Ecto.Schema
 

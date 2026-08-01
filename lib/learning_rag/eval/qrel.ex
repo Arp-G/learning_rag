@@ -1,15 +1,15 @@
 defmodule LearningRag.Eval.Qrel do
   @moduledoc """
-  One relevance judgment ("qrel"): for `query`, `document` is relevant with
-  grade `relevance`. Human experts made these — they are the ground truth
-  every metric compares a ranking against.
+  One relevance judgment ("qrel"): for `query`, `document` counts as relevant
+  with score `relevance`. Human experts wrote these — they're the answer key
+  every metric checks a ranking against.
 
-  SciFact's grades are all 1 (binary relevance). The graded NDCG formula
-  still applies; it just degenerates to the binary case.
+  In SciFact every relevant document just gets a 1 (relevant or not, nothing
+  in between). NDCG can handle graded scores too, but here they're all 1.
 
-  Qrels label DOCUMENTS, but our retrieval returns CHUNKS — the eval runner
-  maps each chunk hit to its parent document (keeping the best-ranked chunk
-  per document) before grading a ranking against these rows.
+  Remember qrels are about DOCUMENTS, but search returns CHUNKS — the eval
+  runner maps each chunk hit back to its document (keeping the best chunk per
+  document) before grading against these rows.
   """
   use Ecto.Schema
 

@@ -2,18 +2,20 @@ defmodule LearningRag.Corpus.Posting do
   @moduledoc """
   One row of the inverted index: "`term` appears in `chunk`, `tf` times".
 
-  This table is the sparse term×chunk matrix from IR theory, stored the only
-  sensible way — as its nonzero cells (coordinate / COO form). A chunk's
-  sparse vector is "all rows with this chunk_id"; the inverted index is
-  "all rows with this term". Same data, two groupings.
+  This table is the term×chunk grid from search theory, stored the practical
+  way: only the cells that aren't zero. You can read it two ways —
 
-  The BM25/TF-IDF score of a chunk for a query is a sparse dot product over
-  these rows: only terms present in BOTH the query and the chunk contribute,
-  which is exactly why sparse retrieval is fast.
+    * all rows with the same chunk_id → that chunk's word counts
+    * all rows with the same term     → every chunk containing that word
+      (this second view is what "inverted index" means)
 
-  Note we store the raw `tf`, not a precomputed weight: IDF, k1 and b are all
-  applied at query time, which is what keeps those parameters tweakable
-  without reindexing.
+  Scoring a chunk for a query only looks at the words the query and chunk
+  share, so a search only ever touches a few rows per word — that's why
+  keyword search is fast.
+
+  We store the raw `tf` (a plain count), not a finished score, on purpose:
+  idf, k1 and b all get applied later at query time, which is what lets you
+  tweak them without rebuilding the index.
   """
   use Ecto.Schema
 
