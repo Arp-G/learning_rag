@@ -10,7 +10,6 @@ defmodule LearningRag.Application do
     children = [
       LearningRagWeb.Telemetry,
       LearningRag.Repo,
-      {DNSCluster, query: Application.get_env(:learning_rag, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: LearningRag.PubSub},
       # Start a worker by calling: LearningRag.Worker.start_link(arg)
       # {LearningRag.Worker, arg},

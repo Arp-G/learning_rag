@@ -23,12 +23,6 @@ config :learning_rag, LearningRagWeb.Endpoint,
   secret_key_base: "Mdeai5Ca7aUUVa+64FQ2rkPB4xQtZZQyeFQ9LN3s84s78J832AbPsvfKFrzWYQ3R",
   server: false
 
-# In test we don't send emails
-config :learning_rag, LearningRag.Mailer, adapter: Swoosh.Adapters.Test
-
-# Disable swoosh api client as it is only required for production adapters
-config :swoosh, :api_client, false
-
 # Print only warnings and errors during test
 config :logger, level: :warning
 

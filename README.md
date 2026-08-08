@@ -1,212 +1,96 @@
 # LearningRag
 
-A hands-on project for learning Retrieval-Augmented Generation (RAG) from the
-retrieval side up, in Elixir + Phoenix with Postgres/pgvector. Every piece is
-built to be read and understood: heavily commented, formulas visible in the
-SQL, intermediate steps logged.
+📓 Study notes: [RAG on Notion](https://app.notion.com/p/RAG-3a77b0f8661080d0beeac65d87b80ac8)
 
-## Roadmap
-
-| Phase | Focus | Status |
-|-------|-------|--------|
-| **1** | **Sparse retrieval** — TF-IDF & BM25 over an inverted index, IR evaluation metrics | ✅ done |
-| **2** | **Semantic search** — OpenAI embeddings + pgvector, exact + HNSW approximate NN | ✅ done |
-| **3** | **Hybrid search** — fuse BM25 + semantic (RRF or weighted) | ✅ done |
-| 4 | LiveView UI — upload, search, tweak parameters, visualize metrics | planned |
-
-Phase 1 is evaluated on **SciFact** (a [BEIR](https://github.com/beir-cellar/beir)
-benchmark: ~5.2K scientific abstracts, 300 test queries with human relevance
-judgments). Published baselines let us verify our implementation — our BM25
-gets **NDCG@10 ≈ 0.69**, in line with the published ~0.665.
+An educational project for learning Retrieval-Augmented Generation (RAG) hands-on,
+from the retrieval side up. It builds each layer of a search stack — sparse
+(TF-IDF, BM25), dense (embeddings), and hybrid — and measures them against a real
+benchmark, so the tradeoffs are concrete rather than abstract. The code is heavily
+commented and the scoring math lives in visible SQL. It's written in Elixir/Phoenix
+with **Postgres + pgvector** (chosen so the whole thing runs on one familiar
+database, no separate vector store) and evaluated on **SciFact** — a
+[BEIR](https://github.com/beir-cellar/beir) benchmark of ~5.2K scientific abstracts
+with 300 human-labeled queries.
 
 ## Setup
 
-Requires Docker (for Postgres) and Elixir (see `.tool-versions`).
+Requires Docker (for Postgres) and Elixir (see `.tool-versions`). An
+`OPENAI_API_KEY` is needed only for the embedding step (semantic/hybrid search).
 
 ```bash
-bin/setup            # starts Postgres in Docker, installs deps, creates + migrates the DB
-mix rag.download     # fetches the SciFact dataset into priv/data/ (~3 MB)
-mix rag.index        # loads → chunks → builds the inverted index (~6s)
+bin/setup                      # start Postgres in Docker + deps + create/migrate DB
+mix rag.download               # fetch the SciFact dataset (~3 MB)
+mix rag.index                  # load, chunk, and build the inverted index
+
+export OPENAI_API_KEY=sk-...   # embeddings only
+mix rag.embed                  # embed chunks + queries (~$0.04, one-time)
 ```
 
-Postgres runs in Docker on host port **5434** (to avoid clashing with other
-local Postgres instances). The container must be running for `mix test` and
-`mix precommit`.
+Postgres runs on host port **5434**; the container must be up for `mix test`.
 
 ## Usage
 
+**Command line**
+
 ```bash
-# Search, with a per-term score breakdown
-mix rag.search "vitamin D deficiency and bone fractures" --scorer bm25 --top 5
-mix rag.search "..." --scorer tfidf
+# Search, with a per-result score breakdown. Scorers: bm25 | tfidf | semantic | hybrid
+mix rag.search "vitamin D deficiency and bone fractures" --scorer bm25 --k1 1.2 --b 0.75
+mix rag.search "..." --scorer semantic
+mix rag.search "..." --scorer hybrid --method weighted --beta 0.5
 
-# Tweak BM25 parameters live (no reindexing — they're query-time values)
-mix rag.search "..." --scorer bm25 --k1 1.2 --b 0.75
-
-# Evaluate a scorer over all 300 SciFact queries
+# Evaluate a scorer over the 300 SciFact queries
 mix rag.eval --scorer bm25
-mix rag.eval --scorer tfidf
-mix rag.eval --scorer bm25 --k1 1.2 --b 0.75
+mix rag.eval --scorer hybrid --method rrf --k 60
+
+# Compare exact vs HNSW approximate vector search (recall + latency)
+mix rag.ann
 ```
 
-Sample results (mean over 300 queries):
+**Web UI** — `mix phx.server`, then <http://localhost:4000>: search with live
+parameter tuning, plus an evaluation page that stacks runs into a comparison table.
 
-| Metric | BM25 | TF-IDF |
-|--------|------|--------|
-| NDCG@10 | 0.694 | 0.539 |
-| MRR@10 | 0.659 | 0.487 |
-| Recall@10 | 0.828 | 0.727 |
+![Web UI screenshot](docs/ui.png)
+<!-- drop a screenshot at docs/ui.png -->
 
-The ~15-point NDCG gap is exactly what BM25's term-frequency saturation (`k1`)
-and length normalization (`b`) buy you over plain TF-IDF. Precision@K looks
-small (~0.1) only because SciFact averages ~1.1 relevant documents per query —
-recall, MRR and NDCG are the informative numbers here.
+## Metrics
 
-## Semantic search & HNSW (Phase 2)
+Mean over the 300 SciFact test queries. NDCG@10 is the headline metric; the
+published SciFact **BM25 baseline is ≈ 0.665**, which our BM25 matches (0.694),
+confirming the implementation.
 
-Instead of matching words, semantic search matches *meaning*: each chunk and the
-query become a 1536-dim vector (OpenAI `text-embedding-3-small`), and we rank by
-cosine similarity using [pgvector](https://github.com/pgvector/pgvector).
+| Scorer | NDCG@10 | MRR@10 | Recall@10 |
+|--------|:-------:|:------:|:---------:|
+| TF-IDF | 0.539 | 0.487 | 0.727 |
+| BM25 | 0.694 | 0.659 | 0.828 |
+| Semantic (OpenAI `text-embedding-3-small`) | 0.712 | 0.676 | 0.851 |
+| **Hybrid** (weighted, β=0.5) | **0.757** | **0.726** | **0.875** |
 
-```bash
-export OPENAI_API_KEY=sk-...       # needed only for embedding
-mix rag.embed                      # embed all chunks + queries (~$0.04, one-time, idempotent)
-
-mix rag.search "how does vitamin D affect bone health" --scorer semantic
-mix rag.eval --scorer semantic     # uses stored query vectors — no API calls
-mix rag.ann                        # exact vs HNSW: recall@10 + latency across ef_search
-```
-
-- **Cosine, not keywords.** `<=>` is pgvector's cosine distance; we report
-  `1 - distance` as the score. A chunk can rank high with zero shared words.
-- **Exact vs approximate.** Search is exact (full scan) by default, or uses the
-  HNSW index; `mix rag.ann` measures the index's recall and speed against the
-  exact baseline as `ef_search` grows — the tradeoff that matters at millions of
-  vectors.
-- **Embeddings are stored, not recomputed.** `mix rag.embed` fills the
-  `chunks.embedding` / `queries.embedding` columns, so evaluation never re-calls
-  OpenAI.
-
-## Hybrid search (Phase 3)
-
-BM25 and semantic search make *different* mistakes — BM25 misses paraphrases,
-semantic misses exact terms. Hybrid runs both and merges their rankings, which
-usually beats either alone. Two fusion methods, each with one tunable knob:
-
-```bash
-# RRF (Reciprocal Rank Fusion) — merges by rank, no score scaling needed
-mix rag.search "..." --scorer hybrid --method rrf --k 60
-mix rag.eval   --scorer hybrid --method rrf --k 60
-
-# Weighted — min-max normalize each score list, then blend
-mix rag.eval   --scorer hybrid --method weighted --beta 0.5   # beta = dense weight (0=BM25, 1=semantic)
-```
-
-- **RRF (`--k`, default 60)** uses only each result's *rank*, so it never has to
-  reconcile BM25's unbounded scores with cosine's −1..1. Robust default. A chunk
-  ranked well by *both* scorers wins; being in both lists at all beats being top
-  of just one.
-- **Weighted (`--beta`, default 0.5)** normalizes each scorer's scores to 0..1
-  and blends: `beta·semantic + (1−beta)·bm25`. `beta` slides smoothly from pure
-  BM25 to pure semantic.
-
-Hybrid reuses the `Bm25` and `Semantic` scorers as-is; each result's breakdown
-shows where the chunk ranked in each, so you can see why it surfaced.
-
-## Observations
-
-The same 300 SciFact queries, run through all four scorers — quality goes up at
-each step:
-
-| Metric (mean over 300 queries) | TF-IDF | BM25 | Semantic | Hybrid |
-|--------------------------------|--------|------|----------|--------|
-| NDCG@10     | 0.539 | 0.694 | 0.712 | **0.757** |
-| MRR@10      | 0.487 | 0.659 | 0.676 | **0.726** |
-| Recall@10   | 0.727 | 0.828 | 0.851 | **0.875** |
-| Precision@5 | 0.137 | 0.161 | 0.176 | **0.181** |
-
-(Hybrid column = weighted fusion, `beta=0.5`.)
-
-In plain terms:
-
-- **BM25 clearly beats plain TF-IDF** (~15 NDCG points). Flattening repeated
-  words and adjusting for chunk length — BM25's two knobs — is what does it.
-- **Semantic beats BM25, but only a little** (0.712 vs 0.694). SciFact is
-  scientific claims full of exact terms, so keyword matching is already strong;
-  embeddings mainly help when the wording differs (synonyms, paraphrases).
-- **Hybrid beats both** (0.757 vs 0.694 / 0.712) — the payoff of fusion. BM25
-  and semantic win on *different* queries, so merging their rankings recovers the
-  union: recall@10 climbs to 0.875. This is the whole reason hybrid exists.
-- **Tuning the fusion:** RRF (no tuning needed) scored NDCG@10 ≈ 0.740; weighted
-  fusion peaked around `beta=0.5` (0.757), with `beta=0.3` → 0.737 and
-  `beta=0.7` → 0.748. Equal weight wins here because both signals are valuable —
-  neither sparse nor dense dominates on SciFact.
-
-### Exact vs HNSW (speed)
-
-Semantic search can find the nearest vectors two ways: check every chunk
-(exact), or use the HNSW index (approximate — it skips most chunks). Over the
-300 queries:
-
-| Search              | recall@10 | latency |
-|---------------------|-----------|---------|
-| HNSW, ef_search=10  | 0.925     | ~3 ms   |
-| HNSW, ef_search=40  | 0.993     | ~3 ms   |
-| exact (full scan)   | 1.000     | ~41 ms  |
-
-- **The index is ~12× faster for a tiny accuracy cost.** At `ef_search=40` it
-  finds 99% of the exact top-10 in a fraction of the time. `ef_search` is the
-  effort dial: higher = more accurate but slower.
-- **Push `ef_search` high enough and Postgres quietly goes back to the exact
-  scan.** pgvector makes the index look more expensive as `ef_search` grows, so
-  past a point the planner decides a full scan is cheaper and uses that instead
-  (`EXPLAIN` shows `Index Scan` turn into `Seq Scan`). At our ~7.7k chunks that
-  happens early; with millions of vectors the index wins easily and stays the
-  only practical choice.
+Quality improves at each step; hybrid wins because BM25 and semantic miss
+*different* queries, so fusing them recovers the union. On the ANN side, HNSW
+returns ~99% of the exact top-10 at a fraction of the latency (`mix rag.ann`).
 
 ## How it works
 
 ```
-documents ──▶ chunks ──▶ postings           queries ──▶ qrels
-(abstracts)  (passages)  (inverted index)   (test set)  (answer key)
+documents ─▶ chunks ─▶ postings (sparse) + embedding (dense)      queries + qrels (ground truth)
 ```
 
-- **Chunks** are the retrieval unit — passages cut from documents.
-- **Postings** are the inverted index: one row per `(term, chunk, tf)`. This
-  *is* the sparse term×chunk matrix, stored as its nonzero cells. A BM25 score
-  is a sparse dot product over these rows.
-- **Linguistics vs ranking are separated on purpose.** Postgres
-  `to_tsvector('english', …)` does tokenization, stop-word removal, and
-  stemming — nothing else (never `ts_rank`/`@@`). All ranking math is our own
-  SQL, with the formula written out as named CTEs in
-  [`bm25.ex`](lib/learning_rag/search/bm25.ex) and
-  [`tf_idf.ex`](lib/learning_rag/search/tf_idf.ex).
-- **The same `to_tsvector('english', …)` runs on both documents and queries**,
-  so their terms line up by construction.
-- **Retrieval is chunk-level; qrels judge documents.** The eval runner maps
-  chunk hits to parent documents (best chunk per document) before grading.
+- **Chunks** are the retrieval unit. **Postings** are the inverted index used by
+  BM25/TF-IDF; **embedding** is the pgvector column used by semantic search.
+- Scoring lives in **SQL with the formula visible** — BM25/TF-IDF as named CTEs,
+  semantic as cosine distance. **Hybrid** fuses the two rankings in Elixir, either
+  by rank (RRF) or by blending normalized scores (weighted).
+- Evaluation retrieves chunks, collapses them to parent documents, and grades the
+  ranking against the qrels.
 
 ### Key modules
 
 | Path | What |
 |------|------|
-| [lib/learning_rag/ingest/chunker.ex](lib/learning_rag/ingest/chunker.ex) | Overlapping word-window chunking |
-| [lib/learning_rag/ingest/indexer.ex](lib/learning_rag/ingest/indexer.ex) | Load → chunk → build postings (the SQL inverted-index build) |
-| [lib/learning_rag/search/bm25.ex](lib/learning_rag/search/bm25.ex) | BM25 scoring in SQL |
-| [lib/learning_rag/search/tf_idf.ex](lib/learning_rag/search/tf_idf.ex) | TF-IDF scoring in SQL (contrast) |
-| [lib/learning_rag/search/semantic.ex](lib/learning_rag/search/semantic.ex) | Dense/cosine search in SQL (pgvector), exact + HNSW modes |
-| [lib/learning_rag/search/hybrid.ex](lib/learning_rag/search/hybrid.ex) | Fuses BM25 + semantic (RRF / weighted) |
-| [lib/learning_rag/search/fusion.ex](lib/learning_rag/search/fusion.ex) | Pure fusion functions (RRF, weighted min-max) |
-| [lib/learning_rag/embed/openai.ex](lib/learning_rag/embed/openai.ex) | Embeds text via OpenAI (Req), behind a swappable behaviour |
-| [lib/learning_rag/eval/metrics.ex](lib/learning_rag/eval/metrics.ex) | Precision@K, Recall@K, MRR, MAP, NDCG@K |
-| [lib/learning_rag/eval/runner.ex](lib/learning_rag/eval/runner.ex) | Runs a scorer over the test set, averages metrics |
-
-## Tests
-
-```bash
-mix test        # or `mix precommit` for format + warnings-as-errors + tests
-```
-
-The search tests index a tiny hand-computable corpus and check the SQL scores
-against the BM25/TF-IDF formulas re-implemented in Elixir — so any drift in the
-SQL is caught exactly.
+| [ingest/chunker.ex](lib/learning_rag/ingest/chunker.ex) | Overlapping word-window chunking |
+| [ingest/indexer.ex](lib/learning_rag/ingest/indexer.ex) | Load → chunk → build the inverted index (SQL) |
+| [search/bm25.ex](lib/learning_rag/search/bm25.ex) · [tf_idf.ex](lib/learning_rag/search/tf_idf.ex) | Sparse scoring in SQL |
+| [search/semantic.ex](lib/learning_rag/search/semantic.ex) | Dense/cosine search (pgvector), exact + HNSW |
+| [search/fusion.ex](lib/learning_rag/search/fusion.ex) · [hybrid.ex](lib/learning_rag/search/hybrid.ex) | RRF / weighted fusion |
+| [embed/openai.ex](lib/learning_rag/embed/openai.ex) | OpenAI embeddings via Req, behind a swappable behaviour |
+| [eval/metrics.ex](lib/learning_rag/eval/metrics.ex) · [runner.ex](lib/learning_rag/eval/runner.ex) | IR metrics (P@K, R@K, MRR, MAP, NDCG) + eval runner |

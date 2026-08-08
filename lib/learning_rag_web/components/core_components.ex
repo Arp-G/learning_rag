@@ -166,6 +166,7 @@ defmodule LearningRagWeb.CoreComponents do
   attr :id, :any, default: nil
   attr :name, :any
   attr :label, :string, default: nil
+  attr :hint, :string, default: nil, doc: "optional help shown as a hover info icon by the label"
   attr :value, :any
 
   attr :type, :string,
@@ -242,7 +243,9 @@ defmodule LearningRagWeb.CoreComponents do
     ~H"""
     <div class="fieldset mb-2">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="label mb-1 flex items-center gap-1">
+          {@label}<.hint :if={@hint} text={@hint} />
+        </span>
         <select
           id={@id}
           name={@name}
@@ -263,7 +266,9 @@ defmodule LearningRagWeb.CoreComponents do
     ~H"""
     <div class="fieldset mb-2">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="label mb-1 flex items-center gap-1">
+          {@label}<.hint :if={@hint} text={@hint} />
+        </span>
         <textarea
           id={@id}
           name={@name}
@@ -284,7 +289,9 @@ defmodule LearningRagWeb.CoreComponents do
     ~H"""
     <div class="fieldset mb-2">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="label mb-1 flex items-center gap-1">
+          {@label}<.hint :if={@hint} text={@hint} />
+        </span>
         <input
           type={@type}
           name={@name}
@@ -299,6 +306,29 @@ defmodule LearningRagWeb.CoreComponents do
       </label>
       <.error :for={msg <- @errors}>{msg}</.error>
     </div>
+    """
+  end
+
+  @doc """
+  A small info icon that reveals help text on hover (a lightweight tooltip).
+
+  ## Examples
+
+      <.hint text="How many results to return." />
+  """
+  attr :text, :string, required: true
+
+  def hint(assigns) do
+    ~H"""
+    <span class="group relative inline-flex align-middle">
+      <.icon
+        name="hero-information-circle"
+        class="size-4 cursor-help opacity-40 group-hover:opacity-90"
+      />
+      <span class="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 hidden w-72 -translate-x-1/2 whitespace-normal wrap-break-word rounded-md bg-neutral px-3 py-2 text-left text-xs font-normal normal-case leading-snug text-neutral-content shadow-lg group-hover:block">
+        {@text}
+      </span>
+    </span>
     """
   end
 
