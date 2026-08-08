@@ -49,8 +49,9 @@ mix rag.ann
 **Web UI** — `mix phx.server`, then <http://localhost:4000>: search with live
 parameter tuning, plus an evaluation page that stacks runs into a comparison table.
 
-![Web UI screenshot](docs/ui.png)
-<!-- drop a screenshot at docs/ui.png -->
+<img width="1865" height="884" alt="image" src="https://github.com/user-attachments/assets/429c8f45-6a3d-4a96-99e8-59f61d587262" />
+<img width="1856" height="810" alt="image" src="https://github.com/user-attachments/assets/771116b5-20be-4658-bb89-a34690521bff" />
+
 
 ## Metrics
 
