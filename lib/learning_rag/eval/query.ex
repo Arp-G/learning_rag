@@ -12,6 +12,11 @@ defmodule LearningRag.Eval.Query do
     # SciFact's own query id — kept so runs can be traced back to the dataset.
     field :external_id, :string
     field :text, :string
+    # The query's embedding, filled by `mix rag.embed`. Storing it here means
+    # semantic evaluation reuses it and never re-calls OpenAI per run.
+    # Same vector(1536) column rules as chunks — see LearningRag.Corpus.Chunk
+    # for how the dimension is set in the migration and what changing it involves.
+    field :embedding, Pgvector.Ecto.Vector
 
     has_many :qrels, LearningRag.Eval.Qrel
   end

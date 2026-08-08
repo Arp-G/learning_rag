@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Rag.Search do
 
   Options:
 
-      --scorer  bm25 (default) | tfidf
+      --scorer  bm25 (default) | tfidf | semantic
       --k1      BM25 term-frequency saturation (BM25 only, default 1.2)
       --b       BM25 length normalization      (BM25 only, default 0.75)
       --top     number of results to show      (default 10)
@@ -22,7 +22,11 @@ defmodule Mix.Tasks.Rag.Search do
 
   @switches [scorer: :string, k1: :float, b: :float, top: :integer]
 
-  @scorers %{"bm25" => LearningRag.Search.Bm25, "tfidf" => LearningRag.Search.TfIdf}
+  @scorers %{
+    "bm25" => LearningRag.Search.Bm25,
+    "tfidf" => LearningRag.Search.TfIdf,
+    "semantic" => LearningRag.Search.Semantic
+  }
 
   @impl Mix.Task
   def run(args) do
@@ -42,7 +46,7 @@ defmodule Mix.Tasks.Rag.Search do
 
     scorer =
       Map.get(@scorers, Keyword.get(opts, :scorer, "bm25")) ||
-        Mix.raise("--scorer must be bm25 or tfidf")
+        Mix.raise("--scorer must be bm25, tfidf, or semantic")
 
     search_opts =
       opts

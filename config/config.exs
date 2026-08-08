@@ -66,6 +66,12 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Teach the Repo's Postgres driver about pgvector's `vector` wire type (see
+# LearningRag.PostgrexTypes). Without this, a `vector` column round-trips as a
+# plain string and %Pgvector{} query params fail to encode. Set here (all envs)
+# because the per-env Repo blocks in dev.exs/test.exs never touch `types:`.
+config :learning_rag, LearningRag.Repo, types: LearningRag.PostgrexTypes
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

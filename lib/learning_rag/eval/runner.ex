@@ -80,7 +80,13 @@ defmodule LearningRag.Eval.Runner do
       # search over chunks. Ask for a big pool (not just @doc_k) because several
       # of these chunks can belong to the same document and collapse into one in
       # the next step — we still want @doc_k distinct documents left afterwards.
-      |> scorer_module.search(Keyword.put(opts, :top_k, @chunk_pool))
+      #
+      # We also hand over the query's stored embedding: the semantic scorer uses
+      # it so evaluation never re-calls OpenAI, while the sparse scorers simply
+      # ignore the extra option.
+      |> scorer_module.search(
+        Keyword.merge(opts, top_k: @chunk_pool, query_embedding: query.embedding)
+      )
       # Collapse chunks → documents. uniq_by keeps the FIRST row it sees for each
       # document_id and drops the rest. Since the list is sorted best-first, that
       # first row is the document's highest-scoring chunk — so each document is

@@ -67,6 +67,9 @@ defmodule LearningRag.MixProject do
        depth: 1},
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
+      # pgvector: stores dense embeddings as a `vector` column and provides the
+      # cosine/L2 distance operators used by semantic search.
+      {:pgvector, "~> 0.3"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},

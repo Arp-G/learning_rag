@@ -32,6 +32,11 @@ config :swoosh, :api_client, false
 # Print only warnings and errors during test
 config :logger, level: :warning
 
+# Embeddings in tests never hit the network: the facade uses a deterministic
+# fake, and the OpenAI module (when tested directly) routes through Req.Test.
+config :learning_rag, :embedder, LearningRag.Embed.Fake
+config :learning_rag, :openai_req_options, plug: {Req.Test, LearningRag.Embed.OpenAI}
+
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
 
