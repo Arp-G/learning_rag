@@ -7,13 +7,18 @@ defmodule Mix.Tasks.Rag.Eval do
 
       $ mix rag.eval --scorer bm25
       $ mix rag.eval --scorer tfidf
-      $ mix rag.eval --scorer bm25 --k1 1.2 --b 0.75
+      $ mix rag.eval --scorer semantic
+      $ mix rag.eval --scorer hybrid --method rrf --k 60
+      $ mix rag.eval --scorer hybrid --method weighted --beta 0.5
 
   Options:
 
-      --scorer  bm25 (default) | tfidf | semantic
-      --k1      BM25 term-frequency saturation (BM25 only)
-      --b       BM25 length normalization      (BM25 only)
+      --scorer  bm25 (default) | tfidf | semantic | hybrid
+      --k1      BM25 term-frequency saturation (bm25/hybrid)
+      --b       BM25 length normalization      (bm25/hybrid)
+      --method  hybrid fusion: rrf (default) | weighted
+      --k       RRF constant                   (hybrid rrf)
+      --beta    dense weight 0..1              (hybrid weighted)
 
   On SciFact, published BM25 gets ~0.665 NDCG@10 — a good target to sanity
   check the BM25 numbers against. Precision looks tiny (~0.1) only because
@@ -24,12 +29,13 @@ defmodule Mix.Tasks.Rag.Eval do
 
   @requirements ["app.start"]
 
-  @switches [scorer: :string, k1: :float, b: :float]
+  @switches [scorer: :string, k1: :float, b: :float, method: :string, k: :integer, beta: :float]
 
   @scorers %{
     "bm25" => LearningRag.Search.Bm25,
     "tfidf" => LearningRag.Search.TfIdf,
-    "semantic" => LearningRag.Search.Semantic
+    "semantic" => LearningRag.Search.Semantic,
+    "hybrid" => LearningRag.Search.Hybrid
   }
 
   @impl Mix.Task
@@ -39,9 +45,9 @@ defmodule Mix.Tasks.Rag.Eval do
 
     scorer =
       Map.get(@scorers, Keyword.get(opts, :scorer, "bm25")) ||
-        Mix.raise("--scorer must be bm25, tfidf, or semantic")
+        Mix.raise("--scorer must be bm25, tfidf, semantic, or hybrid")
 
-    search_opts = Keyword.take(opts, [:k1, :b])
+    search_opts = Keyword.take(opts, [:k1, :b, :method, :k, :beta])
 
     %{mean: mean, query_count: count} = LearningRag.Eval.Runner.run(scorer, search_opts)
 

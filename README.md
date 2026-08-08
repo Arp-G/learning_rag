@@ -11,7 +11,7 @@ SQL, intermediate steps logged.
 |-------|-------|--------|
 | **1** | **Sparse retrieval** — TF-IDF & BM25 over an inverted index, IR evaluation metrics | ✅ done |
 | **2** | **Semantic search** — OpenAI embeddings + pgvector, exact + HNSW approximate NN | ✅ done |
-| 3 | Hybrid search — combine sparse + dense | planned |
+| **3** | **Hybrid search** — fuse BM25 + semantic (RRF or weighted) | ✅ done |
 | 4 | LiveView UI — upload, search, tweak parameters, visualize metrics | planned |
 
 Phase 1 is evaluated on **SciFact** (a [BEIR](https://github.com/beir-cellar/beir)
@@ -87,17 +87,45 @@ mix rag.ann                        # exact vs HNSW: recall@10 + latency across e
   `chunks.embedding` / `queries.embedding` columns, so evaluation never re-calls
   OpenAI.
 
+## Hybrid search (Phase 3)
+
+BM25 and semantic search make *different* mistakes — BM25 misses paraphrases,
+semantic misses exact terms. Hybrid runs both and merges their rankings, which
+usually beats either alone. Two fusion methods, each with one tunable knob:
+
+```bash
+# RRF (Reciprocal Rank Fusion) — merges by rank, no score scaling needed
+mix rag.search "..." --scorer hybrid --method rrf --k 60
+mix rag.eval   --scorer hybrid --method rrf --k 60
+
+# Weighted — min-max normalize each score list, then blend
+mix rag.eval   --scorer hybrid --method weighted --beta 0.5   # beta = dense weight (0=BM25, 1=semantic)
+```
+
+- **RRF (`--k`, default 60)** uses only each result's *rank*, so it never has to
+  reconcile BM25's unbounded scores with cosine's −1..1. Robust default. A chunk
+  ranked well by *both* scorers wins; being in both lists at all beats being top
+  of just one.
+- **Weighted (`--beta`, default 0.5)** normalizes each scorer's scores to 0..1
+  and blends: `beta·semantic + (1−beta)·bm25`. `beta` slides smoothly from pure
+  BM25 to pure semantic.
+
+Hybrid reuses the `Bm25` and `Semantic` scorers as-is; each result's breakdown
+shows where the chunk ranked in each, so you can see why it surfaced.
+
 ## Observations
 
-The same 300 SciFact queries, run through all three scorers — quality goes up at
+The same 300 SciFact queries, run through all four scorers — quality goes up at
 each step:
 
-| Metric (mean over 300 queries) | TF-IDF | BM25 | Semantic |
-|--------------------------------|--------|------|----------|
-| NDCG@10     | 0.539 | 0.694 | 0.712 |
-| MRR@10      | 0.487 | 0.659 | 0.676 |
-| Recall@10   | 0.727 | 0.828 | 0.851 |
-| Precision@5 | 0.137 | 0.161 | 0.176 |
+| Metric (mean over 300 queries) | TF-IDF | BM25 | Semantic | Hybrid |
+|--------------------------------|--------|------|----------|--------|
+| NDCG@10     | 0.539 | 0.694 | 0.712 | **0.757** |
+| MRR@10      | 0.487 | 0.659 | 0.676 | **0.726** |
+| Recall@10   | 0.727 | 0.828 | 0.851 | **0.875** |
+| Precision@5 | 0.137 | 0.161 | 0.176 | **0.181** |
+
+(Hybrid column = weighted fusion, `beta=0.5`.)
 
 In plain terms:
 
@@ -106,8 +134,13 @@ In plain terms:
 - **Semantic beats BM25, but only a little** (0.712 vs 0.694). SciFact is
   scientific claims full of exact terms, so keyword matching is already strong;
   embeddings mainly help when the wording differs (synonyms, paraphrases).
-  Because the two methods win on *different* queries, combining them is the next
-  step — Phase 3 (hybrid).
+- **Hybrid beats both** (0.757 vs 0.694 / 0.712) — the payoff of fusion. BM25
+  and semantic win on *different* queries, so merging their rankings recovers the
+  union: recall@10 climbs to 0.875. This is the whole reason hybrid exists.
+- **Tuning the fusion:** RRF (no tuning needed) scored NDCG@10 ≈ 0.740; weighted
+  fusion peaked around `beta=0.5` (0.757), with `beta=0.3` → 0.737 and
+  `beta=0.7` → 0.748. Equal weight wins here because both signals are valuable —
+  neither sparse nor dense dominates on SciFact.
 
 ### Exact vs HNSW (speed)
 
@@ -162,6 +195,8 @@ documents ──▶ chunks ──▶ postings           queries ──▶ qrels
 | [lib/learning_rag/search/bm25.ex](lib/learning_rag/search/bm25.ex) | BM25 scoring in SQL |
 | [lib/learning_rag/search/tf_idf.ex](lib/learning_rag/search/tf_idf.ex) | TF-IDF scoring in SQL (contrast) |
 | [lib/learning_rag/search/semantic.ex](lib/learning_rag/search/semantic.ex) | Dense/cosine search in SQL (pgvector), exact + HNSW modes |
+| [lib/learning_rag/search/hybrid.ex](lib/learning_rag/search/hybrid.ex) | Fuses BM25 + semantic (RRF / weighted) |
+| [lib/learning_rag/search/fusion.ex](lib/learning_rag/search/fusion.ex) | Pure fusion functions (RRF, weighted min-max) |
 | [lib/learning_rag/embed/openai.ex](lib/learning_rag/embed/openai.ex) | Embeds text via OpenAI (Req), behind a swappable behaviour |
 | [lib/learning_rag/eval/metrics.ex](lib/learning_rag/eval/metrics.ex) | Precision@K, Recall@K, MRR, MAP, NDCG@K |
 | [lib/learning_rag/eval/runner.ex](lib/learning_rag/eval/runner.ex) | Runs a scorer over the test set, averages metrics |
