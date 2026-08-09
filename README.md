@@ -51,6 +51,7 @@ parameter tuning, plus an evaluation page that stacks runs into a comparison tab
 
 <img width="1865" height="884" alt="image" src="https://github.com/user-attachments/assets/429c8f45-6a3d-4a96-99e8-59f61d587262" />
 <img width="1856" height="810" alt="image" src="https://github.com/user-attachments/assets/771116b5-20be-4658-bb89-a34690521bff" />
+<img width="1870" height="902" alt="image" src="https://github.com/user-attachments/assets/62426dd3-a8cb-4231-8bac-20a016dc33f2" />
 
 
 ## Metrics
