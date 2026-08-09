@@ -31,6 +31,10 @@ defmodule LearningRagWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
+  attr :max_width, :string,
+    default: "max-w-2xl",
+    doc: "max width of the content container (wider for the docs-style Learn pages)"
+
   slot :inner_block, required: true
 
   def app(assigns) do
@@ -46,6 +50,7 @@ defmodule LearningRagWeb.Layouts do
         <ul class="flex flex-column px-1 space-x-2 items-center">
           <li><.link navigate={~p"/"} class="btn btn-ghost btn-sm">Search</.link></li>
           <li><.link navigate={~p"/eval"} class="btn btn-ghost btn-sm">Evaluate</.link></li>
+          <li><.link navigate={~p"/learn"} class="btn btn-ghost btn-sm">Learn</.link></li>
           <li>
             <a
               href="https://github.com/Arp-G/learning_rag"
@@ -62,7 +67,7 @@ defmodule LearningRagWeb.Layouts do
     </header>
 
     <main class="px-4 py-20 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-2xl space-y-4">
+      <div class={["mx-auto space-y-4", @max_width]}>
         {render_slot(@inner_block)}
       </div>
     </main>

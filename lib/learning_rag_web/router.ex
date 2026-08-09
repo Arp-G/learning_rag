@@ -19,6 +19,8 @@ defmodule LearningRagWeb.Router do
 
     live "/", SearchLive
     live "/eval", EvalLive
+    live "/learn", LearnLive, :index
+    live "/learn/:slug", LearnLive, :show
   end
 
   # Other scopes may use custom stacks.

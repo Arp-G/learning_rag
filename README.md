@@ -1,6 +1,6 @@
 # LearningRag
 
-📓 Study notes: [RAG on Notion](https://app.notion.com/p/RAG-3a77b0f8661080d0beeac65d87b80ac8)
+📓 **Study notes:** a 17-part [deep dive on how RAG works](notes/) — intuition-first, written alongside this code.
 
 An educational project for learning Retrieval-Augmented Generation (RAG) hands-on,
 from the retrieval side up. It builds each layer of a search stack — sparse

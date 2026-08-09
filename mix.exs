@@ -73,6 +73,9 @@ defmodule LearningRag.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
+      # Renders the study notes (notes/*.md) to HTML for the in-app Learn viewer.
+      # Pure Elixir (no native build), supports GitHub-flavored tables/code.
+      {:earmark, "~> 1.4"},
       {:bandit, "~> 1.5"}
     ]
   end
